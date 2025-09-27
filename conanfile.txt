@@ -1,0 +1,9 @@
+[requires]
+librdkafka/2.8.0
+clickhouse-cpp/2.5.1
+capnproto/1.1.0
+[generators]
+CMakeDeps
+CMakeToolchain
+[layout]
+cmake_layout
