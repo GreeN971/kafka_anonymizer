@@ -60,31 +60,9 @@ public:
         return capture;
     }
 
-
 protected:
     std::string capture;
 
 private:
     
 };
-
-
-/*
-
-protected:
-    const std::string brokers = "localhost:9092";
-    const std::string group_id = "demo-group";
-    const std::string topic ="http_log";
-
-    const std::string &GetTopic() const noexcept{
-        return topic;
-    }
-    
-    const std::string &GetBroker() const noexcept{
-        return brokers;
-    }
-
-    const std::string &GetGroupID() const noexcept{
-        return group_id;
-    }
-*/
