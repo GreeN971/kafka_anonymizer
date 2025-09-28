@@ -18,18 +18,6 @@ target_include_directories(http_log-capnp INTERFACE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(http_log-capnp PUBLIC
     capnproto::capnproto
 )
-add_executable(capnpService
-    src/capnpService.cpp
-)
-target_include_directories(capnpService PRIVATE include)
-
-target_link_libraries(capnpService PRIVATE 
-    http_log-capnp
-    RdKafka::rdkafka++
-    clickhouse-cpp-lib::clickhouse-cpp-lib 
-)
-
-#set_property(TARGET capnpService PROPERTY CXX_STANDARD "17")
 
 add_executable(capnpClient
     src/capnpClient.cpp
