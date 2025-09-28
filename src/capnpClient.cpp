@@ -1,40 +1,15 @@
 #include "schemas/http_log.capnp.h"
-#include <algorithm>
 #include <atomic>
-#include <capnp/blob.h>
-#include <capnp/ez-rpc.h>
-#include <capnp/message.h>
-#include <capnp/common.h>
-#include <capnp/serialize.h>
-#include <capnp/c++.capnp.h>
-#include <capnp/serialize-packed.h>
-#include <cctype>
 #include <condition_variable>
-#include <cstddef>
-#include <cstdint>
-#include <fstream>
-#include <kj/async.h>
-#include <kj/common.h>
-#include <kj/debug.h>
-#include <kj/io.h>
-#include <stdexcept>
-#include <string>
 #include <librdkafka/rdkafkacpp.h>
 #include <csignal>
 #include <iostream>
 #include <string_view>
-#include <type_traits>
-#include <utility>
-#include <vector> 
-#include <kj/array.h>
-#include <kj/common.h>
 #include <Consumer.h>
 #include <memory>
 #include <thread>
 #include <mutex>
-#include <tuple>
 #include <regex>
-#include <algorithm>
 #include <future>
 #include <queue>
 
@@ -63,17 +38,11 @@ KafkaConfPtr ConfigureRole(int8_t role){
             throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + globalErr);
     };
 
-    //set("bootstrap.servers", "localhost:9092");
-    // set("message.max.bytes", "10000");
-    // set("topic.metadata.refresh.interval.ms", "-1"); //disabled
-    // set("batch.num.messages", "10");
-
     if(role == 0) //consumer 
     {
         set("bootstrap.servers", "localhost:9092");
         set("message.max.bytes", "10000");
         set("topic.metadata.refresh.interval.ms", "-1"); //disabled
-        //set("batch.num.messages", "10");
 
         set("enable.auto.commit", "false");
         set("group.id", "group.id");
