@@ -1,5 +1,6 @@
 #include "schemas/http_log.capnp.h"
 #include <algorithm>
+#include <atomic>
 #include <capnp/blob.h>
 #include <capnp/ez-rpc.h>
 #include <capnp/message.h>
@@ -8,6 +9,7 @@
 #include <capnp/c++.capnp.h>
 #include <capnp/serialize-packed.h>
 #include <cctype>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -33,9 +35,11 @@
 #include <tuple>
 #include <regex>
 #include <algorithm>
+#include <future>
+#include <queue>
 
-static bool run = true;
-void on_sigint(int) { run = false; }
+std::atomic<bool> g_shouldExit(false);
+void onInterruptSignal(int) { g_shouldExit = true; }
 
 ConsumerPtr CreateConsumer(RdKafka::Conf *conf)
 {
@@ -117,7 +121,7 @@ ProducerPtr CreateProducer(RdKafka::Conf *conf)
     return ProducerPtr(raw);
 }
 
-inline EditableLog DecodeToEditable(MessagePtr m)
+inline EditableLog DecodeToEditable(RdKafka::Message *m)
 {
     kj::ArrayPtr<const kj::byte> bytes(
         reinterpret_cast<const kj::byte*>(m->payload()), m->len());
@@ -135,10 +139,9 @@ inline EditableLog DecodeToEditable(MessagePtr m)
 void ValidateIPAdress(std::string_view ip)
 {
     std::regex ipFormat(R"((\d{1,3}\.){3}\d{1,3})"); 
-     /*
+    /*
         /d digit format, \d{1,3} one to three digits in row ended by \. aka dot 
-        {3} repeat three times
-        plus the last one
+        {3} repeat three times, plus the last one
     */
     std::match_results<std::string_view::const_iterator> it;
     if(std::regex_match(ip.begin(), ip.end(), it , ipFormat) == false)
@@ -162,113 +165,121 @@ std::string MaskIP(std::string ip)
     return ip;
 }
 
-inline kj::Array<capnp::word> SerializeEdited(const EditableLog &log)
+void Thread1(RdKafka::Producer *producer, std::queue<MessagePtr> &queue, std::atomic<bool> &producerFinishSignal, 
+            std::atomic<bool> &flushFinishSignal, std::mutex &qMutex,std::condition_variable &producerCond)
 {
-    return capnp::messageToFlatArray(*log.arena);
-}
+    while(!producerFinishSignal.load() || !queue.empty())
+        {
+            MessagePtr message;
+            {
+                std::unique_lock<std::mutex> lk(qMutex); //When goes out of scope it automaticly lets go of the lock
+                if(queue.empty() && !producerFinishSignal.load())
+                    producerCond.wait(lk);
+                if(queue.empty())
+                    continue;
+                message = std::move(queue.front());
+                queue.pop(); //pops the nullptr which was left by the std::move
+            }
+            EditableLog editableLog = DecodeToEditable(message.get());
+            std::string ip = std::string(editableLog.log.getRemoteAddr().cStr()); // copy out
+            std::string masked = MaskIP(ip);
+            editableLog.log.setRemoteAddr(masked); 
+            std::cout << masked << " ";
+            auto words = capnp::messageToFlatArray(*editableLog.arena);
+            auto bytes = words.asBytes();
 
-inline kj::ArrayPtr<const kj::byte> AsBytes(kj::Array<capnp::word>& words) 
-{
-  return words.asBytes();
+            RdKafka::ErrorCode errCode = producer->produce(
+                "http_logs_test", 
+                RdKafka::Topic::PARTITION_UA, 
+                RdKafka::Producer::MSG_COPY, 
+                const_cast<void*>(static_cast<const void*>(bytes.begin())),
+                bytes.size(),
+                NULL,
+                0,
+                0,
+                NULL, 
+                NULL
+            );
+            if(errCode == RdKafka::ERR__QUEUE_FULL)
+            {
+                std::lock_guard<std::mutex> lk(qMutex);
+                queue.push(std::move(message));
+            }
+        }
+        flushFinishSignal.store(true);
 }
-
 
 int main()
 {
-    std::string errstr;
-    std::string prodErr;
-    Consumer con;
-    // Create consumer
-    //KafkaConfPtr conConf = ConfigureConsumer(con); //KafkaKey is where I find all metadata about my Kafka config
-    //ConsumerPtr consumer = CreateConsumer(conConf.get());
-    //Test new Config 
+    std::signal(SIGINT, onInterruptSignal);
+    std::mutex unprocessedMessagesMutex;
+    std::condition_variable producerCond;
+    std::queue<MessagePtr> unprocessedMessages;
+    std::atomic<bool> producerFinishSignal(false);
+    std::atomic<bool> flushFinishSignal(false);
+    /*
+        Closing of each thread is done is concurent way. Meaning each thread has its own role. 
+        Main thread is for the initial setup and then closing it all 
+        T1 is for decoding, transforming and pushing transformed messages into producer queue. 
+        T2 is just for flushing the messeges out of the producer queue 
+        All of the work with signal callback which is called upon event. In this case abrupt closing of the program. 
+            If abrupt closing happens first is T1 is notified. Currently processed messages which are inside unprocessed messages queue
+            are pushed into producer queue. Then T1 joins the main thread and T2 flushes the producer queue and closes. 
+            Thread closing order is arranged by atomics. 
+    */
+    
+    //Create consumer
     KafkaConfPtr consumerConf = ConfigureRole(Role::ConsumerRole);
     ConsumerPtr consumer = CreateConsumer(consumerConf.get());
     //Create producer
     KafkaConfPtr producerConf = ConfigureRole(Role::ProducerRole);
     ProducerPtr producer = CreateProducer(producerConf.get());
 
-    // Subscribe
+    auto t1 = std::thread(&Thread1, producer.get(), std::ref(unprocessedMessages), std::ref(producerFinishSignal), 
+            std::ref(flushFinishSignal), std::ref(unprocessedMessagesMutex), std::ref(producerCond));    
+
+    /*
+        async has to be stored since it returns future which eventualy get destroyed. If it was not stored main thread would wait
+        for this one to finish. 
+    */
+    auto t2 = std::async([&producer, &flushFinishSignal](){ 
+        while(!flushFinishSignal.load())
+            producer->flush(100); 
+    });
+
     std::vector<std::string> topics{std::string(Topics::httpLog)};
     Subscribe(consumer.get(), topics);
 
     std::cout << "Consuming from topic \"" << Topics::httpLog << std::endl;
 
-    const void *data;
-    size_t len = 0;
-    int i = 0;
-    void *payload;
     //Sequence - Get Message, Decode Message, Put it into struct, Transform, Send via HTTP to clickhouse
-    while (i != 10) {
+    while (!g_shouldExit) {
         // poll() returns owned pointer; must delete it
         MessagePtr msg;
         msg.reset(consumer->consume(CONSUMER_TIMEOUT));
         switch (msg->err()) {
             case RdKafka::ERR_NO_ERROR:
                 {
-                    EditableLog editableLog = DecodeToEditable(std::move(msg));
-                    std::string ip = std::string(editableLog.log.getRemoteAddr().cStr());   // copy out
-                    std::string masked = MaskIP(ip);                                // returns std::string
-                    editableLog.log.setRemoteAddr(masked); 
-                    std::cout << masked;
-                    // auto words = SerializeEdited(editableLog);
-                    // auto bytes = AsBytes(words);
-                    auto words = capnp::messageToFlatArray(*editableLog.arena);
-                    auto bytes = words.asBytes();
-                    
-                    //TO DO TAKE LOOK AT THIS kj::EventLoop!!
-                    /*
-                    librdkafka is built to be scaled across threads – you can have multiple producers and consumers in different 
-                    threads, and each is thread-safe (multiple threads can share a producer). In practice, it’s common to dedicate 
-                    a thread for Kafka polling (especially for consumers). For example, in a multi-threaded edge server, one thread 
-                    can handle network events and use Kafka producer asynchronously for logging, while another thread (or the same if 
-                    integrated carefully) polls the producer for delivery reports and polls any consumer for incoming events. Many CDN 
-                    systems embed Kafka I/O in existing loops (e.g., using the file descriptor provided by librdkafka for wakeups, to 
-                    integrate with poll() or epoll). If using Cap’n Proto’s RPC/async framework (KJ event loop) alongside, you may 
-                    coordinate the polling mechanisms (both librdkafka and Cap’n Proto can use pollable file descriptors, ensuring 
-                    neither blocks the oth
-                    */
-                    
-                    RdKafka::ErrorCode errCode = producer->produce(
-                        "http_logs_test", 
-                        RdKafka::Topic::PARTITION_UA, 
-                        RdKafka::Producer::MSG_COPY, 
-                        const_cast<void*>(static_cast<const void*>(bytes.begin())),
-                        bytes.size(),
-                        NULL,
-                        0,
-                        0,
-                        NULL, 
-                        NULL
-                    );
-                    if(errCode == RdKafka::ERR__QUEUE_FULL)
-                        throw std::runtime_error("Queue is full");
-                    
-                    //message is returned and passed to Rd::kafka queue right away which is also managed by a different thread
-                    //this thread will wait for one minute to send data via proxy. Reason for queue is that I can dump it all at once 
-                    
-                    //Assign partition to each message meaning I have to create partition here
+                    std::lock_guard<std::mutex> lk(unprocessedMessagesMutex);
+                    unprocessedMessages.push(std::move(msg));
+                    producerCond.notify_one();
                 }
-                break;
-            case RdKafka::ERR__TIMED_OUT:
-                // no message; continue polling
-                break;
-            case RdKafka::ERR__PARTITION_EOF:
-                // reached end of partition (only if enable.partition.eof=true)
                 break;
             default:
                 std::cerr << "Consume error: " << msg->errstr() << "\n";
                 break;
         }
-        i++;
-        producer->poll(1000);
     }
-    producer->flush(300);
-    std::cout << "Closing...\n";
+
+    {
+        std::lock_guard<std::mutex> lk(unprocessedMessagesMutex);
+        producerFinishSignal.store(true);
+        producerCond.notify_one();
+    }
+
+    t1.join();
+    t2.get();
+    std::cout << " Closing...\n";
     RdKafka::wait_destroyed(5000);
     return 0;
 }
-
-/*
-//RdKafka::KafkaConsumer* consumer = RdKafka::KafkaConsumer::create(conf, errstr);
-*/
