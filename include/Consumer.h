@@ -10,7 +10,6 @@
 #include <kj/io.h>
 #include <capnp/message.h>
 #include <capnp/serialize-packed.h>
-#include <htto_log.h>
 #include <type_traits>
 
 #define CONSUMER_TIMEOUT 5000

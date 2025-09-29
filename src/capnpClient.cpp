@@ -1,11 +1,11 @@
 #include "schemas/http_log.capnp.h"
+#include "Consumer.h"
 #include <atomic>
 #include <condition_variable>
 #include <librdkafka/rdkafkacpp.h>
 #include <csignal>
 #include <iostream>
 #include <string_view>
-#include <Consumer.h>
 #include <memory>
 #include <thread>
 #include <mutex>
@@ -63,7 +63,7 @@ KafkaConfPtr ConfigureRole(int8_t role){
         
         set("compression.type", "lz4");
         set("compression.level", "6");
-        set("enable.idempotence", "true");
+        set("enable.idempotence", "false"); //Due zookeper not letting me do on fly changes. When true it breaks rules in documentation
         set("linger.ms", "61000"); //alias for queue.buffering.max.ms
         set("queue.buffering.max.messages", "200000");
         return conf;
@@ -154,6 +154,7 @@ void Thread1(RdKafka::Producer *producer, std::queue<MessagePtr> &queue, std::at
             std::string masked = MaskIP(ip);
             editableLog.log.setRemoteAddr(masked); 
             std::cout << masked << " ";
+            std::cout.flush();
             auto words = capnp::messageToFlatArray(*editableLog.arena);
             auto bytes = words.asBytes();
 
@@ -213,7 +214,7 @@ int main()
     */
     auto t2 = std::async([&producer, &flushFinishSignal](){ 
         while(!flushFinishSignal.load())
-            producer->flush(100); 
+            producer->flush(50); 
     });
 
     std::vector<std::string> topics{std::string(Topics::httpLog)};
@@ -233,6 +234,8 @@ int main()
                     unprocessedMessages.push(std::move(msg));
                     producerCond.notify_one();
                 }
+                break;
+            case RdKafka::ERR__TIMED_OUT:
                 break;
             default:
                 std::cerr << "Consume error: " << msg->errstr() << "\n";
