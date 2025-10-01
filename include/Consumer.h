@@ -14,7 +14,7 @@
 
 #define CONSUMER_TIMEOUT 5000
 
-enum Role {ProducerRole = 1, ConsumerRole = 0};
+enum Role {ProducerRole = 1, ConsumerRole = 0, Topic = 2};
 
 struct ConsumerDeleter {
     void operator()(RdKafka::KafkaConsumer *ptr) const {
@@ -29,12 +29,12 @@ using KafkaConfPtr = std::unique_ptr<RdKafka::Conf>;
 using MessagePtr = std::unique_ptr<RdKafka::Message>;
 using ConsumerPtr = std::unique_ptr<RdKafka::KafkaConsumer, ConsumerDeleter>;
 using ProducerPtr = std::unique_ptr<RdKafka::Producer>;
-
+using TopicPtr = std::unique_ptr<RdKafka::Topic>;
 
 namespace Topics{
     inline constexpr std::string_view httpLog = "http_log";
+    inline constexpr std::string_view httpLogTest = "http_logs_test";
 }
-
 
 struct ConsumerResutl{
     RdKafka::KafkaConsumer *consumer;
@@ -52,16 +52,4 @@ public:
     RdKafka::Conf ConfigureConsumer(Consumer &con);
     RdKafka::Consumer CreateConsumer(RdKafka::Conf *conf);
     void Subscribe(RdKafka::Consumer consumer, std::vector<std::string> &topics);
-
-    //DEFINE_GETTER(Broker, brokers;);
-
-    const std::string &GetCapture() const noexcept{
-        return capture;
-    }
-
-protected:
-    std::string capture;
-
-private:
-    
 };

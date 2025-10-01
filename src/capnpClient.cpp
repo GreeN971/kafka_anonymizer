@@ -2,9 +2,15 @@
 #include "Consumer.h"
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
+#include <iterator>
+#include <kj/common.h>
+#include <kj/units.h>
 #include <librdkafka/rdkafkacpp.h>
+#include <librdkafka/rdkafka.h>
 #include <csignal>
 #include <iostream>
+#include <stdexcept>
 #include <string_view>
 #include <memory>
 #include <thread>
@@ -22,14 +28,47 @@ ConsumerPtr CreateConsumer(RdKafka::Conf *conf)
     auto *raw = RdKafka::KafkaConsumer::create(conf, error);
     if(!raw) 
         throw std::runtime_error("Failed to create consumer " + error);
-
     return ConsumerPtr(raw);
 }
 
-KafkaConfPtr ConfigureRole(int8_t role){
+TopicPtr CreateTopic(RdKafka::Producer *prod, RdKafka::Conf *conf)
+{
+    std::string error;
+    auto *raw = RdKafka::Topic::create(prod, Topics::httpLogTest.data(), conf, error);
+    if(!raw)
+        throw std::runtime_error("Failed to create Producer topic" + error);
+    
+    return TopicPtr(raw);
+}
+
+KafkaConfPtr ConfigureTopic()
+{
+    auto raw = RdKafka::Conf::create(RdKafka::Conf::CONF_TOPIC);
+    if(!raw)
+        throw std::runtime_error("Conf::create(CONF_TOPIC) failed");
+    KafkaConfPtr conf(raw);
+    std::string error; 
+
+    auto set = [&](auto k, auto v){
+        if(conf->set(k, v, error) != RdKafka::Conf::CONF_OK)
+            throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + error);
+    };
+
+    set("acks", "all");
+    /*
+        Even with newest docs for some reason this is as deprecated... even when its said in idempotence to enable it 
+    */
+    set("queuing.strategy", "fifo");
+    /*
+        Compression is not being set since in this case producer protocol should set it instead
+    */
+    return conf;
+}
+
+KafkaConfPtr ConfigureRole(uint8_t role){
     auto raw = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
     if(!raw)
-        throw std::runtime_error("Conf::create(CONF_GLOBAL) for consumer failed");
+        throw std::runtime_error("Conf::create(CONF_GLOBAL) failed");
     KafkaConfPtr conf(raw);
     std::string globalErr; 
     
@@ -37,14 +76,12 @@ KafkaConfPtr ConfigureRole(int8_t role){
         if(conf->set(k, v, globalErr) != RdKafka::Conf::CONF_OK)
             throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + globalErr);
     };
-
-    if(role == 0) //consumer 
+    
+    if(role == Role::ConsumerRole) //consumer 
     {
         set("bootstrap.servers", "localhost:9092");
-        set("message.max.bytes", "10000");
         set("topic.metadata.refresh.interval.ms", "-1"); //disabled
 
-        set("enable.auto.commit", "false");
         set("group.id", "group.id");
         set("auto.offset.reset", "earliest");
         /*
@@ -54,18 +91,23 @@ KafkaConfPtr ConfigureRole(int8_t role){
         return conf;
     }
     
-    if(role == 1) //producer
+    if(role == Role::ProducerRole) //producer
     {
         set("bootstrap.servers", "localhost:9092");
-        set("message.max.bytes", "10000");
         set("topic.metadata.refresh.interval.ms", "-1"); //disabled
-        set("batch.num.messages", "10");
-        
+        set("batch.num.messages", "100000"); //max items in box
+        set("message.max.bytes", "1000");
+        set("batch.size", "3000000"); //compression not accounted for. just to keep overhead just in case, but average size is around 200 bytes
+        set("linger.ms", "100"); //alias for queue.buffering.max.ms. Bigger allows for more efffective compression. 100ms for high throughput 
+
         set("compression.type", "lz4");
-        set("compression.level", "6");
-        set("enable.idempotence", "false"); //Due zookeper not letting me do on fly changes. When true it breaks rules in documentation
-        set("linger.ms", "61000"); //alias for queue.buffering.max.ms
-        set("queue.buffering.max.messages", "200000");
+        set("compression.level", "5");
+
+        set("enable.idempotence", "true");
+        set("max.in.flight.requests.per.connection", "5");
+        set("retries", "200");
+
+        set("queue.buffering.max.messages", "200000"); //whole queue global scope max boxes in warehouse
         return conf;
     }
 
@@ -95,9 +137,9 @@ inline EditableLog DecodeToEditable(RdKafka::Message *m)
     kj::ArrayPtr<const kj::byte> bytes(
         reinterpret_cast<const kj::byte*>(m->payload()), m->len());
     kj::ArrayInputStream is(bytes);
+
     auto keeper = std::make_shared<capnp::InputStreamMessageReader>(is);
     HttpLogRecord::Reader root = keeper->getRoot<HttpLogRecord>();
-    
     auto rootCopy = std::make_shared<capnp::MallocMessageBuilder>();
     rootCopy->setRoot(root);
     HttpLogRecord::Builder log = rootCopy->getRoot<HttpLogRecord>();
@@ -135,7 +177,7 @@ std::string MaskIP(std::string ip)
 }
 
 void Thread1(RdKafka::Producer *producer, std::queue<MessagePtr> &queue, std::atomic<bool> &producerFinishSignal, 
-            std::atomic<bool> &flushFinishSignal, std::mutex &qMutex,std::condition_variable &producerCond)
+            std::atomic<bool> &flushFinishSignal, std::mutex &qMutex,std::condition_variable &producerCond, RdKafka::Topic *topic)
 {
     while(!producerFinishSignal.load() || !queue.empty())
         {
@@ -153,14 +195,16 @@ void Thread1(RdKafka::Producer *producer, std::queue<MessagePtr> &queue, std::at
             std::string ip = std::string(editableLog.log.getRemoteAddr().cStr()); // copy out
             std::string masked = MaskIP(ip);
             editableLog.log.setRemoteAddr(masked); 
+            
             std::cout << masked << " ";
             std::cout.flush();
+            
             auto words = capnp::messageToFlatArray(*editableLog.arena);
             auto bytes = words.asBytes();
 
             RdKafka::ErrorCode errCode = producer->produce(
-                "http_logs_test", 
-                RdKafka::Topic::PARTITION_UA, 
+                topic->name(), 
+                topic->PARTITION_UA, //automatic partitioning, but can be set to 1 as it is in the test enviroment
                 RdKafka::Producer::MSG_COPY, 
                 const_cast<void*>(static_cast<const void*>(bytes.begin())),
                 bytes.size(),
@@ -197,16 +241,20 @@ int main()
             are pushed into producer queue. Then T1 joins the main thread and T2 flushes the producer queue and closes. 
             Thread closing order is arranged by atomics. 
     */
-    
+    Role role;
     //Create consumer
     KafkaConfPtr consumerConf = ConfigureRole(Role::ConsumerRole);
     ConsumerPtr consumer = CreateConsumer(consumerConf.get());
     //Create producer
     KafkaConfPtr producerConf = ConfigureRole(Role::ProducerRole);
     ProducerPtr producer = CreateProducer(producerConf.get());
+    //Create topic
+    KafkaConfPtr topicConf = ConfigureTopic();
+    TopicPtr topic = CreateTopic(producer.get(), topicConf.get());
+    
 
     auto t1 = std::thread(&Thread1, producer.get(), std::ref(unprocessedMessages), std::ref(producerFinishSignal), 
-            std::ref(flushFinishSignal), std::ref(unprocessedMessagesMutex), std::ref(producerCond));    
+            std::ref(flushFinishSignal), std::ref(unprocessedMessagesMutex), std::ref(producerCond), topic.get());    
 
     /*
         async has to be stored since it returns future which eventualy get destroyed. If it was not stored main thread would wait
