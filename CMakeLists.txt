@@ -6,6 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 find_package(RdKafka REQUIRED)
 find_package(clickhouse-cpp REQUIRED)
 find_package(CapnProto REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 capnp_generate_cpp(sources headers schemas/http_log.capnp)
 add_library(http_log-capnp
@@ -27,7 +28,7 @@ target_include_directories(capnpClient PRIVATE include) #In case of not using de
 target_link_libraries(capnpClient PRIVATE 
     http_log-capnp
     RdKafka::rdkafka++
-    clickhouse-cpp-lib::clickhouse-cpp-lib
+    nlohmann_json::nlohmann_json
 )
 
 

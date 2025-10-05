@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <fstream>
 #include <iterator>
 #include <kj/common.h>
 #include <kj/units.h>
@@ -10,6 +11,7 @@
 #include <librdkafka/rdkafka.h>
 #include <csignal>
 #include <iostream>
+#include <nlohmann/json_fwd.hpp>
 #include <stdexcept>
 #include <string_view>
 #include <memory>
@@ -18,6 +20,7 @@
 #include <regex>
 #include <future>
 #include <queue>
+#include <nlohmann/json.hpp>
 
 std::atomic<bool> g_shouldExit(false);
 void onInterruptSignal(int) { g_shouldExit = true; }
@@ -41,34 +44,10 @@ TopicPtr CreateTopic(RdKafka::Producer *prod, RdKafka::Conf *conf)
     return TopicPtr(raw);
 }
 
-KafkaConfPtr ConfigureTopic()
-{
-    auto raw = RdKafka::Conf::create(RdKafka::Conf::CONF_TOPIC);
+KafkaConfPtr Configure(RdKafka::Conf::ConfType confType, const nlohmann::json &data){ //producer | topic | consumer
+    auto raw = RdKafka::Conf::create(confType);
     if(!raw)
-        throw std::runtime_error("Conf::create(CONF_TOPIC) failed");
-    KafkaConfPtr conf(raw);
-    std::string error; 
-
-    auto set = [&](auto k, auto v){
-        if(conf->set(k, v, error) != RdKafka::Conf::CONF_OK)
-            throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + error);
-    };
-
-    set("acks", "all");
-    /*
-        Even with newest docs for some reason this is as deprecated... even when its said in idempotence to enable it 
-    */
-    set("queuing.strategy", "fifo");
-    /*
-        Compression is not being set since in this case producer protocol should set it instead
-    */
-    return conf;
-}
-
-KafkaConfPtr ConfigureRole(uint8_t role){
-    auto raw = RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL);
-    if(!raw)
-        throw std::runtime_error("Conf::create(CONF_GLOBAL) failed");
+        throw std::runtime_error("Conf::create failed");
     KafkaConfPtr conf(raw);
     std::string globalErr; 
     
@@ -76,43 +55,15 @@ KafkaConfPtr ConfigureRole(uint8_t role){
         if(conf->set(k, v, globalErr) != RdKafka::Conf::CONF_OK)
             throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + globalErr);
     };
-    
-    if(role == Role::ConsumerRole) //consumer 
+
+    for(const nlohmann::json &property : data)
     {
-        set("bootstrap.servers", "localhost:9092");
-        set("topic.metadata.refresh.interval.ms", "-1"); //disabled
-
-        set("group.id", "group.id");
-        set("auto.offset.reset", "earliest");
-        /*
-            earliest means it will consume messeges from the begging but with latest it will consume
-            only messages from when the consumer was alive, it means the time factor is present
-        */
-        return conf;
+        if(conf->set(property["propertyName"].get_ref< const std::string&>(),
+            property["value"].get_ref<const std::string&>(), globalErr) != RdKafka::Conf::CONF_OK)
+            throw std::runtime_error(std::string("conf set ") + 
+                property["propertyName"].get_ref<const std::string&>() + "': " + globalErr);
     }
-    
-    if(role == Role::ProducerRole) //producer
-    {
-        set("bootstrap.servers", "localhost:9092");
-        set("topic.metadata.refresh.interval.ms", "-1"); //disabled
-        set("batch.num.messages", "100000"); //max items in box
-        set("message.max.bytes", "1000");
-        set("batch.size", "3000000"); //compression not accounted for. just to keep overhead just in case, but average size is around 200 bytes
-        set("linger.ms", "100"); //alias for queue.buffering.max.ms. Bigger allows for more efffective compression. 100ms for high throughput 
-
-        set("compression.type", "lz4");
-        set("compression.level", "5");
-
-        set("enable.idempotence", "true");
-        set("max.in.flight.requests.per.connection", "5");
-        set("retries", "200");
-
-        set("queue.buffering.max.messages", "200000"); //whole queue global scope max boxes in warehouse
-        return conf;
-    }
-
-    throw std::runtime_error("Failed to choose role");
-    return 0;
+    return conf;
 }
 
 void Subscribe(RdKafka::KafkaConsumer *consumer, const std::vector<std::string> &topics)
@@ -241,17 +192,27 @@ int main()
             are pushed into producer queue. Then T1 joins the main thread and T2 flushes the producer queue and closes. 
             Thread closing order is arranged by atomics. 
     */
-    Role role;
+    nlohmann::json data = nlohmann::json::parse(std::ifstream("config/config.json"));
     //Create consumer
-    KafkaConfPtr consumerConf = ConfigureRole(Role::ConsumerRole);
-    ConsumerPtr consumer = CreateConsumer(consumerConf.get());
+    ConsumerPtr consumer;
+    {
+        KafkaConfPtr consumerConf = Configure(RdKafka::Conf::CONF_GLOBAL, data["consumer"]);
+        consumer = CreateConsumer(consumerConf.get());
+    }
+
     //Create producer
-    KafkaConfPtr producerConf = ConfigureRole(Role::ProducerRole);
-    ProducerPtr producer = CreateProducer(producerConf.get());
+    ProducerPtr producer;
+    {
+        KafkaConfPtr producerConf = Configure(RdKafka::Conf::CONF_GLOBAL, data["producer"]);
+        producer = CreateProducer(producerConf.get());
+    }
+
     //Create topic
-    KafkaConfPtr topicConf = ConfigureTopic();
-    TopicPtr topic = CreateTopic(producer.get(), topicConf.get());
-    
+    TopicPtr topic;
+    {
+        KafkaConfPtr topicConf = Configure(RdKafka::Conf::CONF_TOPIC, data["topic"]);
+        topic = CreateTopic(producer.get(), topicConf.get());
+    }
 
     auto t1 = std::thread(&Thread1, producer.get(), std::ref(unprocessedMessages), std::ref(producerFinishSignal), 
             std::ref(flushFinishSignal), std::ref(unprocessedMessagesMutex), std::ref(producerCond), topic.get());    

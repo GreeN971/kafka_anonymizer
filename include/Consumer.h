@@ -14,8 +14,6 @@
 
 #define CONSUMER_TIMEOUT 5000
 
-enum Role {ProducerRole = 1, ConsumerRole = 0, Topic = 2};
-
 struct ConsumerDeleter {
     void operator()(RdKafka::KafkaConsumer *ptr) const {
         if (ptr) {
@@ -46,10 +44,7 @@ struct EditableLog {
     HttpLogRecord::Builder log;                                    
 };
 
-class Consumer{
-public:
-    KafkaConfPtr ConfigureRole(Role &role);
-    RdKafka::Conf ConfigureConsumer(Consumer &con);
-    RdKafka::Consumer CreateConsumer(RdKafka::Conf *conf);
-    void Subscribe(RdKafka::Consumer consumer, std::vector<std::string> &topics);
-};
+KafkaConfPtr Configure(RdKafka::Conf::ConfType);
+ConsumerPtr CreateConsumer(RdKafka::Conf *conf);
+void Subscribe(RdKafka::Consumer *consumer, std::vector<std::string> &topics);
+
