@@ -30,14 +30,9 @@ using ProducerPtr = std::unique_ptr<RdKafka::Producer>;
 using TopicPtr = std::unique_ptr<RdKafka::Topic>;
 
 namespace Topics{
-    inline constexpr std::string_view httpLog = "http_log";
-    inline constexpr std::string_view httpLogTest = "http_logs_test";
+    inline constexpr std::string_view HTTPLOG = "http_log";
+    inline constexpr std::string_view HTTPLOGTEST = "http_logs_test";
 }
-
-struct ConsumerResutl{
-    RdKafka::KafkaConsumer *consumer;
-    std::string error;
-};
 
 struct EditableLog {
     std::shared_ptr<capnp::MallocMessageBuilder> arena; // owning arena

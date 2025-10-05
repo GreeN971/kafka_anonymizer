@@ -37,7 +37,7 @@ ConsumerPtr CreateConsumer(RdKafka::Conf *conf)
 TopicPtr CreateTopic(RdKafka::Producer *prod, RdKafka::Conf *conf)
 {
     std::string error;
-    auto *raw = RdKafka::Topic::create(prod, Topics::httpLogTest.data(), conf, error);
+    auto *raw = RdKafka::Topic::create(prod, Topics::HTTPLOGTEST.data(), conf, error);
     if(!raw)
         throw std::runtime_error("Failed to create Producer topic" + error);
     
@@ -226,10 +226,10 @@ int main()
             producer->flush(50); 
     });
 
-    std::vector<std::string> topics{std::string(Topics::httpLog)};
+    std::vector<std::string> topics{std::string(Topics::HTTPLOG)};
     Subscribe(consumer.get(), topics);
 
-    std::cout << "Consuming from topic \"" << Topics::httpLog << std::endl;
+    std::cout << "Consuming from topic \"" << Topics::HTTPLOG << std::endl;
 
     //Sequence - Get Message, Decode Message, Put it into struct, Transform, Send via HTTP to clickhouse
     while (!g_shouldExit) {
