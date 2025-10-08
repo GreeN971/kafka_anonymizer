@@ -31,3 +31,13 @@ společně s teoretickými znalostmi, které jsem postupně získával.
 
 Musím se nakonec přiznat, že jsem měl celý svůj myšlenkový pochod dokumentovat už od začátku. 
 Pokud máte zájem, mohu poslat kopii všech poznámek, které při práci vznikly.
+
+K dodělání kódu došlo kvůli nespokojenosti. Obecně jsem se ten kód snažil psát více expresivně 
+kvůli sobě, ale se vší upřímností to na produkci nikoho nezajímá. 
+    Změny: Optimizaliace tvoření protokolů, abych využil smart pointer a nechal config objekt
+           smazat jakmile byl využit při tvorbě objektů (producer, consumer a topic). 
+
+           Přidání json confingu, který mě zbavil toho řešení s Roles a sjednocení na jednu config
+           funkci. 
+
+           Smazání zbytků nepoužitého kódu.

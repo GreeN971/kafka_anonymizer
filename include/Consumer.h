@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <librdkafka/rdkafkacpp.h>
+#include <string>
 #include <string_view>
 #include <unistd.h>
 #include <capnp/c++.capnp.h>
@@ -42,4 +43,3 @@ struct EditableLog {
 KafkaConfPtr Configure(RdKafka::Conf::ConfType);
 ConsumerPtr CreateConsumer(RdKafka::Conf *conf);
 void Subscribe(RdKafka::Consumer *consumer, std::vector<std::string> &topics);
-
