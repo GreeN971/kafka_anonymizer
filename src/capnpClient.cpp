@@ -1,9 +1,9 @@
 #include "schemas/http_log.capnp.h"
-#include "Consumer.h"
+#include "General.h"
+#include "ConfigBasedFactory.h"
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
-#include <fstream>
 #include <iterator>
 #include <kj/common.h>
 #include <kj/units.h>
@@ -11,77 +11,23 @@
 #include <librdkafka/rdkafka.h>
 #include <csignal>
 #include <iostream>
-#include <nlohmann/json_fwd.hpp>
 #include <stdexcept>
-#include <string>
-#include <string_view>
-#include <memory>
 #include <thread>
 #include <mutex>
 #include <regex>
 #include <future>
 #include <queue>
-#include <nlohmann/json.hpp>
+#include <functional>
 
 std::atomic<bool> g_shouldExit(false);
 void onInterruptSignal(int) { g_shouldExit = true; }
 
-ConsumerPtr CreateConsumer(RdKafka::Conf *conf)
-{
-    std::string error;
-    auto *raw = RdKafka::KafkaConsumer::create(conf, error);
-    if(!raw) 
-        throw std::runtime_error("Failed to create consumer " + error);
-    return ConsumerPtr(raw);
-}
-
-TopicPtr CreateTopic(RdKafka::Producer *prod, RdKafka::Conf *conf)
-{
-    std::string error;
-    auto *raw = RdKafka::Topic::create(prod, Topics::HTTPLOGTEST.data(), conf, error);
-    if(!raw)
-        throw std::runtime_error("Failed to create Producer topic" + error);
-    
-    return TopicPtr(raw);
-}
-
-KafkaConfPtr Configure(RdKafka::Conf::ConfType confType, const nlohmann::json &data){ //producer | topic | consumer
-    auto raw = RdKafka::Conf::create(confType);
-    if(!raw)
-        throw std::runtime_error("Conf::create failed");
-    KafkaConfPtr conf(raw);
-    std::string globalErr; 
-    
-    auto set = [&](auto k, auto v){
-        if(conf->set(k, v, globalErr) != RdKafka::Conf::CONF_OK)
-            throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + globalErr);
-    };
-
-    for(const nlohmann::json &property : data)
-    {
-        if(conf->set(property["propertyName"].get_ref< const std::string&>(),
-            property["value"].get_ref<const std::string&>(), globalErr) != RdKafka::Conf::CONF_OK)
-            throw std::runtime_error(std::string("conf set ") + 
-                property["propertyName"].get_ref<const std::string&>() + "': " + globalErr);
-    }
-    return conf;
-}
 
 void Subscribe(RdKafka::KafkaConsumer *consumer, const std::vector<std::string> &topics)
 {
     RdKafka::ErrorCode err = consumer->subscribe(topics);
     if(err) 
         std::runtime_error("Subscribe failed: " + RdKafka::err2str(err));
-}
-
-ProducerPtr CreateProducer(RdKafka::Conf *conf)
-{
-    std::string err;
-    auto *raw = RdKafka::Producer::create(conf, err);
-    if(!raw)
-        throw std::runtime_error("Failed to create Producer" + err);
-
-    return ProducerPtr(raw);
 }
 
 inline EditableLog DecodeToEditable(RdKafka::Message *m)
@@ -175,92 +121,6 @@ void Thread1(RdKafka::Producer *producer, std::queue<MessagePtr> &queue, std::at
         flushFinishSignal.store(true);
 }
 
-/*
-class IKafkaFactory
-{
-public:
-    virtual void CreateTopic() = 0; 
-    virtual void CreateProducer() = 0;
-    virtual void CreateConsumer() = 0;
-};*/
-
-class ConfigData //rename to ConfigBasedFactory, reconsider to use final keyword
-{
-public: 
-    ConfigData();
-    ConfigData(std::string_view path)
-    {
-        m_data = nlohmann::json::parse(std::ifstream(path.data()));
-    }
-
-    nlohmann::json GetDataByKey(std::string_view key) //remove to make interface more clean
-    {
-        if(GetData().contains(key))
-        {
-            auto arr  = GetData().at(key);
-            return arr;
-        }
-        throw std::runtime_error("key not found");
-    }
-
-    /*
-        1) Separate core logic of Configure to self contained method that will create conf (move it to private block)
-        2) Create 3 methods -> CreateTopic, CreateProducer, CreateConsumer
-            | - each methods will accept arguments specific to topic/producer/consumer creation + key (you already know which ConfType for which object to pass)
-    */
-
-    KafkaConfPtr Configure(std::string_view key, RdKafka::Conf::ConfType confType)
-    { //producer | topic | consumer
-        auto raw = RdKafka::Conf::create(confType);
-        if(!raw)
-            throw std::runtime_error("Conf::create failed");
-        KafkaConfPtr conf(raw);
-        std::string globalErr; 
-        
-        auto set = [&](auto k, auto v){
-            if(conf->set(k, v, globalErr) != RdKafka::Conf::CONF_OK)
-                throw std::runtime_error(std::string("conf set '") + std::string(k) + "': " + globalErr);
-        };
-
-        for(const nlohmann::json &property : m_data[key])
-        {
-            if(conf->set(property["propertyName"].get_ref< const std::string&>(),
-                property["value"].get_ref<const std::string&>(), globalErr) != RdKafka::Conf::CONF_OK)
-                throw std::runtime_error(std::string("conf set ") + 
-                    property["propertyName"].get_ref<const std::string&>() + "': " + globalErr);
-        }
-        return conf;
-    }
-protected: 
-    const nlohmann::json &GetData() {return m_data;}
-private:
-    nlohmann::json m_data;
-};
-
-class Consumer
-{
-public:
-    void SetConfig(std::string_view key, RdKafka::Conf::ConfType type, ConfigData &data)
-    {
-        m_confPtr = data.Configure(key, type);
-    }
-
-    ConsumerPtr CreateConsumer()
-    {
-        std::string error;
-        RdKafka::KafkaConsumer *consumer = RdKafka::KafkaConsumer::create(m_confPtr.get(), error);
-        if(!consumer) 
-            throw std::runtime_error("Failed to create consumer " + error);
-        return ConsumerPtr(consumer);
-    }
-    //ConsumerPtr GetConsumer() { return m_consumer;}
-protected:
-
-private: 
-    KafkaConfPtr m_confPtr;
-    std::string_view m_key;
-};
-
 int main()
 {
     std::signal(SIGINT, onInterruptSignal);
@@ -279,30 +139,17 @@ int main()
             are pushed into producer queue. Then T1 joins the main thread and T2 flushes the producer queue and closes. 
             Thread closing order is arranged by atomics. 
     */
-    nlohmann::json data = nlohmann::json::parse(std::ifstream("config/config.json"));
     
-    ConfigData configData("config/config.json");
+    ConfigBasedFactory configBasedFactory("config/config.json");
     //Create consumer
-    ConsumerPtr consumer;
-    {
-        Consumer con;
-        con.SetConfig("consumer", RdKafka::Conf::CONF_GLOBAL, configData);
-        consumer = con.CreateConsumer();
-    }
+    ConsumerPtr consumer = configBasedFactory.CreateConsumer("consumer");
 
     //Create producer
-    ProducerPtr producer;
-    {
-        KafkaConfPtr producerConf = Configure(RdKafka::Conf::CONF_GLOBAL, data["producer"]);
-        producer = CreateProducer(producerConf.get());
-    }
+    ProducerPtr producer = configBasedFactory.CreateProducer("producer");
 
     //Create topic
-    TopicPtr topic;
-    {
-        KafkaConfPtr topicConf = Configure(RdKafka::Conf::CONF_TOPIC, data["topic"]);
-        topic = CreateTopic(producer.get(), topicConf.get());
-    }
+    TopicPtr topic = configBasedFactory.CreateTopic("topic", Topics::HTTPLOGTEST, producer.get());
+
 
     auto t1 = std::thread(&Thread1, producer.get(), std::ref(unprocessedMessages), std::ref(producerFinishSignal), 
             std::ref(flushFinishSignal), std::ref(unprocessedMessagesMutex), std::ref(producerCond), topic.get());    

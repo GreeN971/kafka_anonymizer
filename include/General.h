@@ -15,20 +15,7 @@
 
 #define CONSUMER_TIMEOUT 5000
 
-struct ConsumerDeleter {
-    void operator()(RdKafka::KafkaConsumer *ptr) const {
-        if (ptr) {
-            ptr->close();
-            delete ptr;
-        }
-    }
-};
-
-using KafkaConfPtr = std::unique_ptr<RdKafka::Conf>;
 using MessagePtr = std::unique_ptr<RdKafka::Message>;
-using ConsumerPtr = std::unique_ptr<RdKafka::KafkaConsumer, ConsumerDeleter>;
-using ProducerPtr = std::unique_ptr<RdKafka::Producer>;
-using TopicPtr = std::unique_ptr<RdKafka::Topic>;
 
 namespace Topics{
     inline constexpr std::string_view HTTPLOG = "http_log";
@@ -40,6 +27,4 @@ struct EditableLog {
     HttpLogRecord::Builder log;                                    
 };
 
-KafkaConfPtr Configure(RdKafka::Conf::ConfType);
-ConsumerPtr CreateConsumer(RdKafka::Conf *conf);
 void Subscribe(RdKafka::Consumer *consumer, std::vector<std::string> &topics);
