@@ -1,3 +1,4 @@
+FINÁLNÍ VERZE JE V REFACTORING VĚTVI
 Můj myšlenkový pochod byl nejprve rozdělit si úkol na malé a snadno splnitelné části. 
 Flow teoretického řešení (viz „pseudodiagram“). Diagram jsem tvořil jen pro sebe.  
 
