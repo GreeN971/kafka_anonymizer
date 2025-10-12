@@ -19,7 +19,7 @@ using ConsumerPtr = std::unique_ptr<RdKafka::KafkaConsumer, ConsumerDeleter>;
 using ProducerPtr = std::unique_ptr<RdKafka::Producer>;
 using TopicPtr = std::unique_ptr<RdKafka::Topic>;
 
-class ConfigBasedFactory 
+class ConfigBasedFactory final
 {
 public: 
     ConfigBasedFactory();
@@ -35,8 +35,6 @@ public:
 
     KafkaConfPtr Configure(std::string_view key, RdKafka::Conf *conf);
 
-protected: 
-    const nlohmann::json &GetData() {return m_data;}
 private:
     nlohmann::json m_data;
 };

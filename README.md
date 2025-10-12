@@ -41,3 +41,8 @@ kvůli sobě, ale se vší upřímností to na produkci nikoho nezajímá.
            funkci. 
 
            Smazání zbytků nepoužitého kódu.
+
+Tento týden jsem provedl refaktoring, který ještě lépe zorganizoval tvorbu protokolů pomocí 
+návrhového vzoru factor. Byla pro to založena separátní větev. Spoléhám se pouze na to, že znám 
+názvy svého consumeru, produceru nebo topicu v konfiguraci. Při vytváření pak stačí zadat jejich 
+jméno a systém je automaticky vytvoří i nakonfiguruje v jednom kroku.
