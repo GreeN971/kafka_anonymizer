@@ -20,8 +20,13 @@ target_link_libraries(http_log-capnp PUBLIC
     capnproto::capnproto
 )
 
-add_executable(capnpClient
+list(APPEND CAPNPCLIENTSOURCES 
     src/capnpClient.cpp
+    src/ConfigBasedFactory.cpp
+)
+
+add_executable(capnpClient
+    ${CAPNPCLIENTSOURCES}
 )
 target_include_directories(capnpClient PRIVATE include) #In case of not using delete
 

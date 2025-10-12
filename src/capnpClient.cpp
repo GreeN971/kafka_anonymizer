@@ -150,7 +150,6 @@ int main()
     //Create topic
     TopicPtr topic = configBasedFactory.CreateTopic("topic", Topics::HTTPLOGTEST, producer.get());
 
-
     auto t1 = std::thread(&Thread1, producer.get(), std::ref(unprocessedMessages), std::ref(producerFinishSignal), 
             std::ref(flushFinishSignal), std::ref(unprocessedMessagesMutex), std::ref(producerCond), topic.get());    
 
