@@ -46,3 +46,24 @@ Tento týden jsem provedl refaktoring, který ještě lépe zorganizoval tvorbu 
 návrhového vzoru factor. Byla pro to založena separátní větev. Spoléhám se pouze na to, že znám 
 názvy svého consumeru, produceru nebo topicu v konfiguraci. Při vytváření pak stačí zadat jejich 
 jméno a systém je automaticky vytvoří i nakonfiguruje v jednom kroku.
+
+Retrospektivně mi dochází, že jsem si dostatečně nepředstavil, jak aplikace běží na origin serveru a 
+zpracovává veškerá data jednotlivých PoPů, a tím pádem jsem neaplikoval odpovídající škálování. 
+Nastavení počtu konzumentů v Kafka Engine už samo o sobě není takový problém. Výsledně by však bylo 
+nutné doladit multithreadovou logiku, protože ConfigBasedFactory mi umožňuje vytvořit libovolný 
+počet konzumentů a producerů.
+Řešení by pravděpodobně spočívalo v tom, že data přicházející na http_log by bylo nutné partitionovat, 
+abych zachoval princip one consumer per partition. Toto teoretické rozdělení musí mít svůj partition 
+key jako ideální kandidát se jeví resourceId. Takto by mohlo běžet několik instancí stejné 
+stream-processing aplikace. Důvodem použití klíče je to, abych data logicky rozdělil a nespoléhal 
+pouze na round-robin. Pořadí zpráv bude zajištěno pomocí offsetu, který si jednotliví konzumenti ve 
+stejné skupině koordinují s Kafkou, jež uchovává offsety všech konzumentů.
+
+Škálovatelná cesta, jak postupovat po transformaci dat: 
+    První řešení by bylo ekvivalentní počet partitionů v topiku pro transformované logy.
+    To znamená například, že pokud jsem rozdělil data tak, že vše s resourceId = 345 spadá do 
+    partition 1 v topiku http_log, pak tato data půjdou i do partition 1 v topiku 
+    http_log_transformed. V takovém případě bude nutné ručně nastavit partition pro Kafka Engine 
+    tabulku v ClickHouse. Takových tabulek může být mnoho, proto je vhodné mít více klíčů pro jeden 
+    partition – například rozdělení podle lokace. Pokud například vím, že dané resourceId odpovídá 
+    regionu EU-WEST, mohou tato data spadat společně do partition 1, ale záleží na use case. 
