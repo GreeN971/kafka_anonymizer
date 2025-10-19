@@ -1,0 +1,31 @@
+{
+    "producer":[
+        {"propertyName": "bootstrap.servers", "value": "broker:29092"},
+        {"propertyName": "topic.metadata.refresh.interval.ms", "value": "-1"},
+        { "propertyName": "batch.num.messages", "value": "100000" },
+        { "propertyName": "message.max.bytes", "value": "1000" },
+        { "propertyName": "batch.size", "value": "3000000" },
+        { "propertyName": "linger.ms", "value": "100" },
+
+        { "propertyName": "compression.type", "value": "lz4" },
+        { "propertyName": "compression.level", "value": "5" },
+
+        { "propertyName": "enable.idempotence", "value": "true" },
+        { "propertyName": "max.in.flight.requests.per.connection", "value": "5"},
+        { "propertyName": "retries", "value": "200" },
+        { "propertyName": "retry.backoff.ms", "value": "1000"},
+        { "propertyName": "retry.backoff.max.ms", "value": "3000"},
+        { "propertyName": "queue.buffering.max.messages", "value": "200000" }
+    ],
+    "consumer": [
+        { "propertyName": "bootstrap.servers", "value": "broker:29092" },
+        { "propertyName": "topic.metadata.refresh.interval.ms", "value": "-1" },
+
+        { "propertyName": "group.id", "value": "1" },
+        { "propertyName": "auto.offset.reset", "value": "earliest" }
+    ],
+    "topic": [
+        {"propertyName": "acks", "value": "all"},
+        {"propertyName": "queuing.strategy", "value": "fifo"}
+    ]
+}
