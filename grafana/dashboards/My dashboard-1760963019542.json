@@ -56,8 +56,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
-  "iteration": 1760881734192,
+  "iteration": 1760956028779,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -151,7 +150,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "exemplar": true,
-          "expr": "kafka_server_broker_topic_metrics_messagesinpersec_rate{topic=\"http_logs_test\"}\n-\n(\n  kafka_server_broker_topic_metrics_bytesoutpersec_rate{topic=\"http_logs_test\"}\n  /\n  (\n    kafka_server_broker_topic_metrics_bytesinpersec_rate{topic=\"http_logs_test\"}\n    /\n    clamp_min(kafka_server_broker_topic_metrics_messagesinpersec_rate{topic=\"http_logs_test\"}, 1)\n  )\n)",
+          "expr": "sum by (topic) (\n  (\n    kafka_server_broker_topic_metrics_messagesinpersec_rate{topic=\"http_logs_test\"} * 60\n    -\n    (\n      kafka_server_broker_topic_metrics_bytesoutpersec_rate{topic=\"http_logs_test\"} offset 1m\n      /\n      (\n        kafka_server_broker_topic_metrics_bytesinpersec_rate{topic=\"http_logs_test\"} offset 1m\n        /\n        clamp_min(kafka_server_broker_topic_metrics_messagesinpersec_rate{topic=\"http_logs_test\"} offset 1m, 1)\n      )\n    )\n  ) * 60\n)",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -250,27 +249,9 @@
       "targets": [
         {
           "builderOptions": {
-            "fields": [
-              "raw_sum",
-              "m"
-            ],
-            "filters": [
-              {
-                "condition": "AND",
-                "filterType": "custom",
-                "key": "m",
-                "operator": "WITH IN DASHBOARD TIME RANGE",
-                "restrictToFields": [
-                  {
-                    "label": "m",
-                    "name": "m",
-                    "picklistValues": [],
-                    "type": "DateTime"
-                  }
-                ],
-                "type": "datetime"
-              }
-            ],
+            "database": "default",
+            "fields": [],
+            "filters": [],
             "groupBy": [],
             "limit": 200,
             "metrics": [
@@ -282,16 +263,35 @@
             ],
             "mode": "list",
             "orderBy": [],
-            "table": "mv_raw_to_bytes_per_min",
-            "timeField": "m",
+            "table": "",
             "timeFieldType": "DateTime"
           },
           "datasource": {
             "uid": "8BJ8LgqNz"
           },
           "hide": false,
-          "queryType": "builder",
-          "rawSql": "SELECT raw_sum, m FROM \"mv_raw_to_bytes_per_min\" WHERE   ( m  >= $__fromTime AND m <= $__toTime ) LIMIT 200",
+          "meta": {
+            "builderOptions": {
+              "database": "default",
+              "fields": [],
+              "filters": [],
+              "groupBy": [],
+              "limit": 200,
+              "metrics": [
+                {
+                  "aggregation": "sum",
+                  "alias": "",
+                  "field": "bytesSent"
+                }
+              ],
+              "mode": "list",
+              "orderBy": [],
+              "table": "",
+              "timeFieldType": "DateTime"
+            }
+          },
+          "queryType": "sql",
+          "rawSql": "SELECT raw_sum, m FROM bytes_per_min \nWHERE m >= now() - INTERVAL 1 DAY;",
           "refId": "B"
         }
       ],
@@ -466,7 +466,7 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -485,7 +485,7 @@
             }
           },
           "queryType": "sql",
-          "rawSql": "SELECT ts_minute, toString(status), sum(cnt) AS cnt\nFROM status_counts\nWHERE ts_minute >= now() - INTERVAL 5 DAY\nGROUP BY ts_minute, status\nORDER BY ts_minute, status;",
+          "rawSql": "SELECT ts_minute, toString(status), sum(cnt) AS cnt\nFROM status_counts\nWHERE ts_minute >= now() - INTERVAL 1 DAY\nGROUP BY ts_minute, status\nORDER BY ts_minute, status;",
           "refId": "A",
           "selectedFormat": 0
         }
@@ -685,7 +685,7 @@
             }
           },
           "queryType": "sql",
-          "rawSql": "SELECT\n  toStartOfMinute(ts) AS time,\n  sum(bytes) AS bytes\nFROM mv_bytes_per_min_localized\nWHERE ts >= toDateTime($__from / 1000)\n  AND ts <  toDateTime($__to   / 1000)\nGROUP BY time\nORDER BY time;",
+          "rawSql": "SELECT\n  toStartOfMinute(ts) AS time,\n  sum(bytes) AS bytes\nFROM bytes_per_min_localized\nWHERE ts >= toDateTime($__from / 1000)\n  AND ts <  toDateTime($__to   / 1000)\nGROUP BY time\nORDER BY time;",
           "refId": "B"
         }
       ],
@@ -862,7 +862,7 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -1024,7 +1024,95 @@
           },
           "custom": {
             "axisLabel": "",
-            "axisPlacement": "left",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "8.4.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "exemplar": true,
+          "expr": "sum by (topic) (\n  avg_over_time(\n    floor(kafka_server_broker_topic_metrics_messagesinpersec_rate{\n      env=\"cluster-demo\",\n      instance=\"jmx-kafka:5556\",\n      job=\"kafka\",\n      service=\"kafka-broker\",\n      topic=~\"http_log|http_logs_test\"\n    } * 60)[1m:]\n  )\n)",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "B"
+        }
+      ],
+      "title": "Average Incoming Message Rate",
+      "type": "timeseries"
+    },
+    {
+      "description": "Aggregated to one minute",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
             "fillOpacity": 25,
@@ -1069,7 +1157,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "kafka_server_broker_topic_metrics_bytesinpersec_rate{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\", topic=\"http_log\"}"
+              "options": "{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\", topic=\"http_log\"}"
             },
             "properties": [
               {
@@ -1081,133 +1169,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "kafka_server_broker_topic_metrics_bytesinpersec_rate{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\", topic=\"http_logs_test\"}"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "http_logs_test"
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 17
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "8.4.5",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
-          },
-          "exemplar": true,
-          "expr": "kafka_server_broker_topic_metrics_bytesinpersec_rate{aggregate=\"OneMinute\",env=\"cluster-demo\",instance=\"jmx-kafka:5556\",job=\"kafka\",service=\"kafka-broker\",topic=~\"http_log|http_logs_test|http_logs_transformed\"}",
-          "format": "time_series",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "title": "Average Incoming Message Rate",
-      "type": "timeseries"
-    },
-    {
-      "description": "Aggregated to one minute",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "kafka_server_broker_topic_metrics_messagesinpersec_rate{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\"}"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "All kafka topics"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "kafka_server_broker_topic_metrics_messagesinpersec_rate{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\", topic=\"http_log\"}"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "http_log topic"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "kafka_server_broker_topic_metrics_messagesinpersec_rate{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\", topic=\"http_logs_test\"}"
+              "options": "{aggregate=\"OneMinute\", env=\"cluster-demo\", instance=\"jmx-kafka:5556\", job=\"kafka\", service=\"kafka-broker\", topic=\"http_logs_test\"}"
             },
             "properties": [
               {
@@ -1242,12 +1204,12 @@
             "type": "prometheus",
             "uid": "PBFA97CFB590B2093"
           },
-          "exemplar": false,
-          "expr": "kafka_server_broker_topic_metrics_messagesinpersec_rate{aggregate = \"OneMinute\",topic!=\"__consumer_offsets\"}\n",
+          "exemplar": true,
+          "expr": "floor(\n  kafka_server_broker_topic_metrics_messagesinpersec_rate{\n    topic!~\"(__consumer_offsets)\",\n    topic!=\"\"\n  } * 60\n)",
           "hide": false,
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "title": "Message In Per Topic",
@@ -1274,7 +1236,7 @@
       {
         "current": {
           "isNone": true,
-          "selected": false,
+          "selected": true,
           "text": "None",
           "value": ""
         },
@@ -1283,9 +1245,6 @@
           "uid": "8BJ8LgqNz"
         },
         "definition": "",
-        "error": {
-          "message": "Datasource 8BJ8LgqNz was not found"
-        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
@@ -1301,8 +1260,8 @@
     ]
   },
   "time": {
-    "from": "2025-09-27T21:20:19.290Z",
-    "to": "2025-10-01T19:01:27.102Z"
+    "from": "now-1h",
+    "to": "now"
   },
   "timepicker": {},
   "timezone": "",

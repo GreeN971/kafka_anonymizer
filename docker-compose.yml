@@ -137,3 +137,5 @@ services:
     depends_on:
       - http-log-kafka-producer
       - ch-proxy
+    volumes:
+      - ./docker/anonymizer/config:/app/config
